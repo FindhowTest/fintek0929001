@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>LINE LIFF GPS</title>
+  <script src="https://static.line-scdn.net/liff/edge/versions/2.1.13/sdk.js"></script>
+  <style>
+    body {
+      font-family: 'Roboto', sans-serif;
+      margin: 0;
+      background: #f4f7f9;
+      color: #333;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      text-align: center;
+      height: calc(var(--vh, 1vh) * 100);
+      overscroll-behavior: none;
+      padding: 10px; /* 確保小裝置上有額外的空間 */
+    }
+    h1 {
+      font-size: 2em;
+      margin-top: 20px;
+      color: #333;
+      word-break: break-word; /* 防止長字被切掉 */
+      max-width: 100%;
+    }
+    nav {
+      margin: 20px 0;
+    }
+    button {
+      padding: 15px 30px;
+      font-size: 1.2em;
+      cursor: pointer;
+      border: none;
+      border-radius: 5px;
+      background: #007bff;
+      color: #fff;
+      transition: background 0.3s, color 0.3s;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    input[type="text"], input[type="datetime-local"], select {
+      padding: 12px;
+      font-size: 1em;
+      width: 80%;
+      max-width: 500px;
+      margin: 10px auto;
+      border-radius: 5px;
+      border: 1px solid #ddd;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    #result, #resultLeave {
+      margin-top: 20px;
+      font-size: 1.2em;
+    }
+    #result {
+      color: #ff4d4d;
+    }
+    .tab {
+      display: none;
+    }
+    .active {
+      display: block;
+    }
+    .nav-container {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap; /* 讓按鈕在小螢幕上自動換行 */
+    }
+  </style>
+</head>
+<body>
+  <div>
+    <h1>Finetek 泛皓工作管理系統</h1>
+    <nav class="nav-container">
+      <button onclick="showTab('checkin')">打卡系統</button>
+      <button onclick="showTab('leave')">請假系統</button>
+    </nav>
+
+    <!-- Check-in System -->
+    <div id="checkin" class="tab active">
+      <input type="text" id="userNameInput" placeholder="用戶名" readonly>
+      <br>
+      <select id="statusSelect">
+        <option value="上班">上班</option>
+        <option value="出差">出差</option>
+        <option value="下班">下班</option>
+      </select>
+      <br>
+      <input type="text" id="taskInput" placeholder="今日工作事項">
+      <br>
+      <button onclick="handleCheckIn()">打卡</button>
+      <div id="result"></div>
+    </div>
+
+    <!-- Leave Request System -->
+    <div id="leave" class="tab">
+      <input type="text" id="userNameLeave" placeholder="用戶名" readonly>
+      <br>
+      <label for="startTimeInput">請假開始時間:</label>
+      <input type="datetime-local" id="startTimeInput">
+      <br>
+      <label for="endTimeInput">請假結束時間:</label>
+      <input type="datetime-local" id="endTimeInput">
+      <br>
+      <label for="reasonInput">請假原因填寫:</label>
+      <input type="text" id="reasonInput" placeholder="請輸入請假原因">
+      <br>
+      <button onclick="handleLeaveRequest()">提出申請</button>
+      <div id="resultLeave"></div>
+    </div>
+  </div>
+
+  <script>
+    let latitude = null;
+    let longitude = null;
+
+    // 計算視口高度並動態設置
+    let vh = window.innerHeight * 0.01;
+    document.documentElement.style.setProperty('--vh', `${vh}px`);
+
+    window.addEventListener('resize', () => {
+      // 每次窗口大小變化時重新計算視口高度
+      let vh = window.innerHeight * 0.01;
+      document.documentElement.style.setProperty('--vh', `${vh}px`);
+    });
+
+    window.onload = function() {
+      console.log('Window loaded');
+      
+      liff.init({ liffId: "2006394040-8akNQwKK" }, () => {
+        console.log('LIFF 初始化成功');
+
+        if (!liff.isLoggedIn()) {
+          console.log('用戶未登入，重定向到登入頁面...');
+          liff.login();
+        } else {
+          console.log('用戶已經登入。');
+          liff.getProfile()
+            .then(profile => {
+              console.log('已獲取個人資料:', profile);
+              document.getElementById('userNameInput').value = profile.displayName;
+              document.getElementById('userNameLeave').value = profile.displayName;
+            })
+            .catch(error => {
+              console.error('獲取個人資料錯誤:', error);
+              document.getElementById('result').innerText = '獲取用戶信息失敗';
+            });
+        }
+      }, err => {
+        console.error('LIFF 初始化失敗:', err);
+        document.getElementById('result').innerText = '初始化失敗，請檢查控制台日誌。';
+      });
+    };
+
+    function handleCheckIn() {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            latitude = position.coords.latitude;
+            longitude = position.coords.longitude;
+            getGeocodedAddress(latitude, longitude)
+              .then(address => {
+                submitTask(address);
+              });
+          },
+          showError
+        );
+      } else {
+        document.getElementById('result').innerText = "此瀏覽器不支持地理位置服務。";
+      }
+    }
+
+    function getGeocodedAddress(lat, lon) {
+      const apiKey = '00ab1a9eba20418e8bcf08826ea5396d';
+      const url = `https://api.opencagedata.com/geocode/v1/json?q=${lat}+${lon}&key=${apiKey}`;
+      return fetch(url)
+        .then(response => response.json())
+        .then(data => {
+          if (data.results && data.results.length > 0) {
+            return data.results[0].formatted;
+          } else {
+            return '地址未找到';
+          }
+        })
+        .catch(error => {
+          console.error('地理編碼錯誤:', error);
+          return '地址未找到';
+        });
+    }
+
+    function submitTask(address) {
+      const task = document.getElementById('taskInput').value;
+      const userName = document.getElementById('userNameInput').value;
+      const status = document.getElementById('statusSelect').value;
+
+      if (task && userName) {
+        if (latitude !== null && longitude !== null) {
+          const message = `員工: ${userName}\n工作事項: ${task}\n位置: ${address}\n打卡狀態: ${status}`;
+          liff.sendMessages([{
+            'type': 'text',
+            'text': message
+          }]).then(function () {
+            document.getElementById('result').innerText = '打卡成功';
+            liff.closeWindow();
+          }).catch(function (error) {
+            document.getElementById('result').innerText = '發送消息失敗: ' + error;
+            console.error('發送消息錯誤:', error);
+          });
+        } else {
+          document.getElementById('result').innerText = "未能獲取位置";
+        }
+      } else {
+        document.getElementById('result').innerText = "請輸入工作事項";
+      }
+    }
+
+    function handleLeaveRequest() {
+      const startTime = document.getElementById('startTimeInput').value;
+      const endTime = document.getElementById('endTimeInput').value;
+      const reason = document.getElementById('reasonInput').value;
+      const userName = document.getElementById('userNameLeave').value;
+
+      if (startTime && endTime && reason && userName) {
+        const message = `員工: ${userName}\n請假申請:\n開始時間: ${startTime}\n結束時間: ${endTime}\n原因: ${reason}`;
+        liff.sendMessages([{
+          'type': 'text',
+          'text': message
+        }]).then(function () {
+          document.getElementById('resultLeave').innerText = '請假申請已提交';
+        }).catch(function (error) {
+          document.getElementById('resultLeave').innerText = '發送消息失敗: ' + error;
+          console.error('發送消息錯誤:', error);
+        });
+      } else {
+        document.getElementById('resultLeave').innerText = "請輸入所有請假資訊";
+      }
+    }
+
+    function showError(error) {
+      switch(error.code) {
+        case error.PERMISSION_DENIED:
+          document.getElementById('result').innerText = "用戶拒絕了地理位置請求。";
+          break;
+        case error.POSITION_UNAVAILABLE:
+          document.getElementById('result').innerText = "位置信息不可用。";
+          break;
+        case error.TIMEOUT:
+          document.getElementById('result').innerText = "請求位置超時。";
+          break;
+        case error.UNKNOWN_ERROR:
+          document.getElementById('result').innerText = "未知錯誤。";
+          break;
+      }
+    }
+
+    function showTab(tabId) {
+      const tabs = document.querySelectorAll('.tab');
+      tabs.forEach(tab => tab.classList.remove('active'));
+      document.getElementById(tabId).classList.add('active');
+    }
+  </script>
+</body>
+</html>
